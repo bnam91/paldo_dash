@@ -3,8 +3,13 @@ import os
 from PyQt5.QtWidgets import QApplication
 from dashboard import Dashboard
 from release_updater import ReleaseUpdater
+import PyQt5
 
 if __name__ == "__main__":
+    # Qt 플러그인 경로 설정
+    qt_plugin_path = os.path.join(os.path.dirname(PyQt5.__file__), "Qt5", "plugins")
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = qt_plugin_path
+    
     # GitHub 저장소 정보 설정
     owner = os.environ.get("GITHUB_OWNER", "bnam91")
     repo = os.environ.get("GITHUB_REPO", "paldo_dash")
