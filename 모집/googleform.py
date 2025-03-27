@@ -118,12 +118,27 @@ def create_form_from_template(template_name, folder_id, custom_title=None, custo
         
         print(f"폼이 성공적으로 폴더로 이동되었습니다. 파일명: {updated_file.get('name')}, 새 부모 폴더: {updated_file.get('parents')}")
         
-        # 폼 URL 생성
-        form_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+        # 폼 생성 후 공유 가능 설정
+        # 폼에 대한 접근 권한 설정 (링크가 있는 모든 사용자가 접근 가능하도록)
+        drive_service.permissions().create(
+            fileId=form_id,
+            body={
+                'type': 'anyone',
+                'role': 'reader',
+                'allowFileDiscovery': False
+            }
+        ).execute()
+        
+        print("폼이 '링크가 있는 모든 사용자'와 공유되도록 설정되었습니다.")
+        
+        # 편집 URL 및 제출용 URL 생성
+        form_edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+        form_view_url = f"https://docs.google.com/forms/d/{form_id}/viewform"
         
         return {
             'form_id': form_id,
-            'form_url': form_url
+            'form_edit_url': form_edit_url,
+            'form_view_url': form_view_url
         }
         
     except HttpError as error:
@@ -303,12 +318,27 @@ def create_sample_form(form_title, folder_id):
         
         print(f"폼이 성공적으로 폴더로 이동되었습니다. 파일명: {updated_file.get('name')}, 새 부모 폴더: {updated_file.get('parents')}")
         
-        # 폼 URL 생성
-        form_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+        # 폼 생성 후 공유 가능 설정
+        # 폼에 대한 접근 권한 설정 (링크가 있는 모든 사용자가 접근 가능하도록)
+        drive_service.permissions().create(
+            fileId=form_id,
+            body={
+                'type': 'anyone',
+                'role': 'reader',
+                'allowFileDiscovery': False
+            }
+        ).execute()
+        
+        print("폼이 '링크가 있는 모든 사용자'와 공유되도록 설정되었습니다.")
+        
+        # 편집 URL 및 제출용 URL 생성
+        form_edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+        form_view_url = f"https://docs.google.com/forms/d/{form_id}/viewform"
         
         return {
             'form_id': form_id,
-            'form_url': form_url
+            'form_edit_url': form_edit_url,
+            'form_view_url': form_view_url
         }
         
     except HttpError as error:
@@ -354,8 +384,9 @@ def create_form_with_gui(template_name, folder_name, custom_title, custom_descri
                 'folder_id': folder_id,
                 'folder_name': folder_name,
                 'form_id': result['form_id'],
-                'form_url': result['form_url'],
-                'message': f"폼이 성공적으로 생성되었습니다! URL: {result['form_url']}"
+                'form_edit_url': result['form_edit_url'],
+                'form_view_url': result['form_view_url'],
+                'message': f"폼이 성공적으로 생성되었습니다! 편집 URL: {result['form_edit_url']}\n공유 URL: {result['form_view_url']}"
             }
         else:
             return {
@@ -459,7 +490,8 @@ def main():
     
     if result:
         print(f"폼이 성공적으로 생성되었습니다!")
-        print(f"폼 URL: {result['form_url']}")
+        print(f"편집 URL: {result['form_edit_url']}")
+        print(f"공유 URL: {result['form_view_url']}")
     else:
         print("폼 생성에 실패했습니다.")
 

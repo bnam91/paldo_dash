@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTabWidget, QListWidget, QStackedWidget,
                              QListWidgetItem, QLabel, QPushButton, QComboBox,
                              QLineEdit, QFormLayout, QGroupBox, QRadioButton,
-                             QMessageBox, QCheckBox, QFileDialog)
+                             QMessageBox, QCheckBox, QFileDialog, QInputDialog)
 from PyQt5.QtCore import Qt, QUrl, QMimeData
 from PyQt5.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 
@@ -20,6 +20,8 @@ from PyQt5.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '모집'))
 from template_loader import list_templates
 from googleform import create_form_with_gui
+# 구글폼 UI 모듈 추가 임포트
+from googleform_ui import GoogleFormUI
 
 # 이미지 업로드를 위한 추가 임포트
 import mimetypes
@@ -182,6 +184,8 @@ class Dashboard(QMainWindow):
         super().__init__()
         self.setWindowTitle("대시보드")
         self.setGeometry(100, 100, 1280, 800)
+        self.admin_access_granted = False  # 관리자 접근 권한 초기화
+        self.admin_tab_index = 7  # 관리자 탭의 인덱스 (나중에 설정됨)
         self.initUI()
         
     def initUI(self):
@@ -194,17 +198,48 @@ class Dashboard(QMainWindow):
         self.tabs = QTabWidget()
         
         # 각 탭 생성
+        self.status_tab = self.create_tab_with_sidebar("전체현황")
         self.recruitment_tab = self.create_tab_with_sidebar("모집")
         self.selection_tab = self.create_tab_with_sidebar("선정")
         self.report_tab = self.create_tab_with_sidebar("보고")
+        self.purchase_tab = self.create_tab_with_sidebar("가구매")
+        self.empty_tab = self.create_tab_with_sidebar("-")  # 빈 탭 추가
+        self.people_tab = self.create_tab_with_sidebar("인원정보")  # 인원정보 탭 추가
+        self.admin_tab = self.create_tab_with_sidebar("관리자")  # 관리자 탭 추가
+        
+        # 현황 탭에 사이드바 아이템 추가
+        self.add_sidebar_items(self.status_tab, ["대시보드", "통계"])
         
         # 모집 탭에 사이드바 아이템 추가
-        self.add_sidebar_items(self.recruitment_tab, ["구글폼 만들기", "노션 가이드만들기", "배포"])
+        self.add_sidebar_items(self.recruitment_tab, ["구글폼 만들기", "노션 가이드만들기", "배포", "인원선정"])
         
-        # 탭 추가
+        # 인원정보 탭에 사이드바 아이템 추가
+        self.add_sidebar_items(self.people_tab, ["전체 목록", "검색"])
+        
+        # 가구매 탭에 사이드바 아이템 추가
+        self.add_sidebar_items(self.purchase_tab, ["구매내역", "등록"])
+        
+        # 관리자 탭에 사이드바 아이템 추가
+        self.add_sidebar_items(self.admin_tab, ["사용자 관리", "시스템 설정", "로그 확인"])
+        
+        # 탭 추가 - 원하는 순서대로 배치
+        self.tabs.addTab(self.status_tab["widget"], "전체현황")
         self.tabs.addTab(self.recruitment_tab["widget"], "모집")
         self.tabs.addTab(self.selection_tab["widget"], "선정")
         self.tabs.addTab(self.report_tab["widget"], "보고")
+        self.tabs.addTab(self.purchase_tab["widget"], "가구매")
+        self.tabs.addTab(self.empty_tab["widget"], "")  # 빈 탭 추가
+        self.tabs.addTab(self.people_tab["widget"], "인원정보")  # 인원정보 탭 추가
+        self.tabs.addTab(self.admin_tab["widget"], "관리자")
+        
+        # 관리자 탭 인덱스 저장 (이제 7번 인덱스)
+        self.admin_tab_index = 7
+        
+        # 탭 변경 이벤트 연결
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        
+        # 관리자 탭에 초기 콘텐츠 설정 (인증 전)
+        self.setup_admin_initial_content()
         
         main_layout.addWidget(self.tabs)
     
@@ -273,192 +308,8 @@ class Dashboard(QMainWindow):
     
     def create_googleform_ui(self):
         """구글폼 만들기 UI 생성"""
-        form_widget = QWidget()
-        main_layout = QVBoxLayout(form_widget)
-        main_layout.setSpacing(20)  # 기본 간격 설정
-        main_layout.setContentsMargins(20, 20, 20, 20)  # 여백 설정
-        
-        # 폼 생성 방식과 템플릿 선택을 수평으로 배치
-        top_layout = QHBoxLayout()
-        top_layout.setSpacing(15)  # 수평 레이아웃 간격 설정
-        
-        # 폼 생성 방식 선택 그룹
-        method_group = QGroupBox("폼 생성 방식")
-        method_layout = QVBoxLayout()
-        method_layout.setSpacing(10)  # 그룹 내 간격 설정
-        method_layout.setContentsMargins(15, 15, 15, 15)  # 그룹 내 여백 설정
-        
-        self.radio_template = QRadioButton("템플릿 사용하여 생성")
-        self.radio_sample = QRadioButton("기본 샘플 폼 생성")
-        self.radio_template.setChecked(True)  # 기본값으로 템플릿 선택
-        
-        method_layout.addWidget(self.radio_template)
-        method_layout.addWidget(self.radio_sample)
-        method_group.setLayout(method_layout)
-        top_layout.addWidget(method_group)
-        
-        # 템플릿 선택 UI
-        template_group = QGroupBox("템플릿 선택")
-        template_layout = QFormLayout()
-        
-        self.template_combo = QComboBox()
-        
-        # 사용 가능한 템플릿 목록 가져오기
-        templates = list_templates()
-        if templates:
-            self.template_combo.addItems(templates)
-        else:
-            self.template_combo.addItem("사용 가능한 템플릿 없음")
-        
-        template_layout.addRow("템플릿:", self.template_combo)
-        template_group.setLayout(template_layout)
-        top_layout.addWidget(template_group)
-        
-        # 수평 레이아웃을 메인 레이아웃에 추가
-        main_layout.addLayout(top_layout)
-        
-        # 섹션 간 간격 추가
-        spacer1 = QWidget()
-        spacer1.setFixedHeight(15)
-        main_layout.addWidget(spacer1)
-        
-        # 폴더명 및 폼 정보 입력 UI
-        info_group = QGroupBox("폼 정보")
-        info_layout = QFormLayout()
-        info_layout.setSpacing(12)  # 폼 레이아웃 간격 설정
-        info_layout.setContentsMargins(15, 15, 15, 15)  # 여백 설정
-        
-        self.folder_input = QLineEdit()
-        self.title_input = QLineEdit()
-        self.desc_input = QLineEdit()
-        
-        # 이미지 입력 위젯을 커스텀 위젯으로 교체
-        self.image_input_widget = ImageDropWidget()
-        
-        info_layout.addRow("생성할 구글폴더명:", self.folder_input)
-        info_layout.addRow("폼 제목 (필수):", self.title_input)
-        info_layout.addRow("폼 설명 (필수):", self.desc_input)
-        info_layout.addRow("이미지:", self.image_input_widget)
-        
-        info_group.setLayout(info_layout)
-        main_layout.addWidget(info_group)
-        
-        # 섹션 간 간격 추가
-        spacer2 = QWidget()
-        spacer2.setFixedHeight(15)
-        main_layout.addWidget(spacer2)
-        
-        # 생성 버튼
-        self.create_button = QPushButton("폼 생성하기")
-        self.create_button.setFixedHeight(40)  # 버튼 높이 설정
-        self.create_button.setStyleSheet("font-size: 14px;")  # 버튼 텍스트 크기 키우기
-        self.create_button.clicked.connect(self.create_form)
-        main_layout.addWidget(self.create_button)
-        
-        # 섹션 간 간격 추가
-        spacer3 = QWidget()
-        spacer3.setFixedHeight(15)
-        main_layout.addWidget(spacer3)
-        
-        # 결과 표시 부분
-        result_group = QGroupBox("생성 결과")
-        result_layout = QVBoxLayout()
-        result_layout.setSpacing(12)  # 결과 영역 간격 설정
-        result_layout.setContentsMargins(15, 15, 15, 15)  # 여백 설정
-        
-        # 결과 텍스트 레이블
-        self.result_label = QLabel()
-        self.result_label.setWordWrap(True)
-        self.result_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        result_layout.addWidget(self.result_label)
-        
-        # 링크 버튼 영역
-        self.link_buttons_layout = QHBoxLayout()
-        
-        # 초기 상태에서는 버튼을 숨김
-        self.form_link_button = QPushButton("폼 열기")
-        self.folder_link_button = QPushButton("폴더 열기")
-        self.form_link_button.setVisible(False)
-        self.folder_link_button.setVisible(False)
-        
-        self.link_buttons_layout.addWidget(self.form_link_button)
-        self.link_buttons_layout.addWidget(self.folder_link_button)
-        result_layout.addLayout(self.link_buttons_layout)
-        
-        result_group.setLayout(result_layout)
-        main_layout.addWidget(result_group)
-        
-        main_layout.addStretch()
-        return form_widget
-    
-    def toggle_form_options(self):
-        """폼 생성 방식에 따라 UI 요소 활성화/비활성화"""
-        is_template = self.radio_template.isChecked()
-        self.template_combo.setEnabled(is_template)
-    
-    def create_form(self):
-        """폼 생성 버튼 클릭 시 처리"""
-        # 입력값 검증
-        folder_name = self.folder_input.text().strip()
-        title = self.title_input.text().strip()
-        description = self.desc_input.text().strip()
-        image_url = self.image_input_widget.get_url()
-        
-        if not folder_name:
-            QMessageBox.warning(self, "입력 오류", "저장할 폴더명을 입력해주세요.")
-            return
-        
-        if not title:
-            QMessageBox.warning(self, "입력 오류", "폼 제목을 입력해주세요.")
-            return
-        
-        if not description:
-            QMessageBox.warning(self, "입력 오류", "폼 설명을 입력해주세요.")
-            return
-        
-        # 템플릿 또는 샘플 선택
-        template_name = None
-        if self.radio_template.isChecked():
-            template_name = self.template_combo.currentText()
-            if template_name == "사용 가능한 템플릿 없음":
-                QMessageBox.warning(self, "템플릿 오류", "사용 가능한 템플릿이 없습니다.")
-                return
-        
-        # "처리 중" 메시지 표시
-        self.result_label.setText("폼을 생성하는 중입니다. 잠시만 기다려주세요...")
-        self.form_link_button.setVisible(False)
-        self.folder_link_button.setVisible(False)
-        QApplication.processEvents()  # UI 업데이트
-        
-        # 폼 생성 함수 호출
-        result = create_form_with_gui(
-            template_name, 
-            folder_name, 
-            title, 
-            description, 
-            image_url if image_url else None
-        )
-        
-        # 결과 표시
-        if result['success']:
-            self.result_label.setText(result['message'])
-            QMessageBox.information(self, "성공", "폼이 성공적으로 생성되었습니다!")
-            
-            # 폼 URL 버튼 설정
-            self.form_link_button.setVisible(True)
-            self.form_link_button.clicked.connect(
-                lambda: QDesktopServices.openUrl(QUrl(result['form_url']))
-            )
-            
-            # 폴더 URL 버튼 설정
-            folder_url = f"https://drive.google.com/drive/folders/{result['folder_id']}"
-            self.folder_link_button.setVisible(True)
-            self.folder_link_button.clicked.connect(
-                lambda: QDesktopServices.openUrl(QUrl(folder_url))
-            )
-        else:
-            self.result_label.setText(result['message'])
-            QMessageBox.warning(self, "오류", result['message'])
+        # 모듈화된 GoogleFormUI 위젯 반환
+        return GoogleFormUI()
     
     def run_googleform(self):
         """구글폼 만들기 스크립트 실행"""
@@ -469,4 +320,77 @@ class Dashboard(QMainWindow):
             print("구글폼 만들기 스크립트가 실행되었습니다.")
         except Exception as e:
             print(f"구글폼 만들기 스크립트 실행 중 오류 발생: {e}")
+    
+    def setup_admin_initial_content(self):
+        """관리자 탭의 초기 콘텐츠 설정 (인증 전)"""
+        # 관리자 탭의 콘텐츠 스택에 새로운 위젯 추가 (인증 전 표시용)
+        auth_widget = QWidget()
+        auth_layout = QVBoxLayout(auth_widget)
+        
+        # 인증 필요 메시지
+        auth_label = QLabel("이 영역에 접근하려면 관리자 인증이 필요합니다.")
+        auth_label.setAlignment(Qt.AlignCenter)
+        auth_label.setStyleSheet("font-size: 16px; color: #666;")
+        
+        # 인증 버튼
+        auth_button = QPushButton("관리자 인증하기")
+        auth_button.setFixedWidth(200)
+        auth_button.clicked.connect(self.authenticate_admin)
+        
+        auth_layout.addStretch()
+        auth_layout.addWidget(auth_label)
+        auth_layout.addSpacing(20)
+        auth_layout.addWidget(auth_button, 0, Qt.AlignCenter)
+        auth_layout.addStretch()
+        
+        # 관리자 탭의 콘텐츠 스택에 추가 (인덱스 0에)
+        self.admin_tab["content_stack"].insertWidget(0, auth_widget)
+        
+        # 사이드바가 선택되었을 때 이벤트 처리를 위해 커스텀 처리
+        self.admin_tab["sidebar"].currentRowChanged.disconnect()  # 기존 연결 해제
+        self.admin_tab["sidebar"].currentRowChanged.connect(self.on_admin_sidebar_changed)
+        
+        # 초기 화면 설정 (인증 화면)
+        self.admin_tab["content_stack"].setCurrentIndex(0)
+        
+        # 사이드바 비활성화
+        self.admin_tab["sidebar"].setEnabled(False)
+    
+    def on_admin_sidebar_changed(self, index):
+        """관리자 탭의 사이드바 아이템 선택 시 처리"""
+        if self.admin_access_granted:
+            # 인증이 성공한 경우에만 콘텐츠 변경 (인덱스 + 1 사용)
+            self.admin_tab["content_stack"].setCurrentIndex(index + 1)
+        else:
+            # 인증이 안된 경우 인증 화면 유지
+            self.admin_tab["content_stack"].setCurrentIndex(0)
+    
+    def authenticate_admin(self):
+        """관리자 인증 처리"""
+        password, ok = QInputDialog.getText(
+            self, "관리자 인증", "승인번호를 입력하세요:", 
+            QLineEdit.Password
+        )
+        
+        # 비밀번호 확인
+        if ok and password == "8422":
+            self.admin_access_granted = True
+            QMessageBox.information(self, "인증 성공", "관리자 모드에 접근합니다.")
+            
+            # 사이드바 활성화
+            self.admin_tab["sidebar"].setEnabled(True)
+            
+            # 첫번째 사이드바 항목으로 이동
+            if self.admin_tab["sidebar"].count() > 0:
+                self.admin_tab["sidebar"].setCurrentRow(0)
+                self.admin_tab["content_stack"].setCurrentIndex(1)  # 인덱스 1부터 실제 콘텐츠
+        else:
+            QMessageBox.warning(self, "인증 실패", "잘못된 승인번호입니다.")
+    
+    def on_tab_changed(self, index):
+        """탭 변경 시 호출되는 이벤트 핸들러"""
+        # 관리자 탭으로 이동하고 아직 인증되지 않았으면 인증 화면 표시
+        if index == self.admin_tab_index and not self.admin_access_granted:
+            # 인증 화면(인덱스 0)으로 설정
+            self.admin_tab["content_stack"].setCurrentIndex(0)
 
