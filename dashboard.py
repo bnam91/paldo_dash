@@ -18,6 +18,7 @@ from PyQt5.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 
 # 모집 폴더에서 필요한 모듈 임포트
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '모집'))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '모집', '구글모집폼만들기'))
 from template_loader import list_templates
 from googleform import create_form_with_gui
 # 구글폼 UI 모듈 추가 임포트
@@ -82,7 +83,7 @@ class Dashboard(QMainWindow):
         
         # 탭 추가 - 원하는 순서대로 배치
         self.tabs.addTab(self.status_tab["widget"], "전체현황")
-        self.tabs.addTab(self.recruitment_tab["widget"], "모집")
+        self.tabs.addTab(self.recruitment_tab["widget"], "소셜체험단")
         self.tabs.addTab(self.selection_tab["widget"], "선정")
         self.tabs.addTab(self.report_tab["widget"], "보고")
         self.tabs.addTab(self.purchase_tab["widget"], "가구매")
