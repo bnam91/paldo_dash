@@ -12,7 +12,7 @@ import json
 from auth import get_credentials
 from template_loader import load_template, list_templates
 
-def create_form_from_template(template_name, folder_id, custom_title=None, custom_description=None, custom_image_url=None):
+def create_form_from_template(template_name, folder_id, custom_title=None, custom_description=None, custom_image_url=None, custom_product_options=None, custom_channel_options=None):
     """템플릿을 기반으로 구글 폼을 생성합니다."""
     template_data = load_template(template_name)
     if not template_data:
@@ -25,6 +25,20 @@ def create_form_from_template(template_name, folder_id, custom_title=None, custo
         template_data['description'] = custom_description
     if custom_image_url:
         template_data['image_url'] = custom_image_url
+    
+    # 사용자가 정의한 상품 옵션이 있는 경우 해당 질문 찾아서 업데이트
+    if custom_product_options and len(custom_product_options) > 0:
+        for i, question in enumerate(template_data['questions']):
+            if "희망상품" in question.get('title', ''):
+                template_data['questions'][i]['options'] = custom_product_options
+                break
+    
+    # 사용자가 정의한 채널 옵션이 있는 경우 해당 질문 찾아서 업데이트
+    if custom_channel_options and len(custom_channel_options) > 0:
+        for i, question in enumerate(template_data['questions']):
+            if "신청 채널" in question.get('title', ''):
+                template_data['questions'][i]['options'] = custom_channel_options
+                break
     
     try:
         # 인증 정보 가져오기
@@ -166,16 +180,48 @@ def create_question_request(question, index):
         request['createItem']['item']['questionItem']['question']['textQuestion'] = {}
     elif question['type'] == 'PARAGRAPH_TEXT':
         request['createItem']['item']['questionItem']['question']['textQuestion'] = {'paragraph': True}
-    elif question['type'] == 'RADIO':
-        options = [{'value': option} for option in question.get('options', [])]
+    elif question['type'] == 'RADIO' or question['type'] == 'CHECKBOX':
+        # 옵션 처리 - 간단한 문자열 또는 객체일 수 있음
+        options = []
+        seen_values = set()  # 중복 확인을 위한 집합
+        
+        for option in question.get('options', []):
+            if isinstance(option, dict):
+                value = option.get('label', '')
+                # 중복된 값인지 확인
+                if value in seen_values:
+                    # 중복된 경우 고유 값으로 만들기 (숫자 추가)
+                    original_value = value
+                    counter = 1
+                    while value in seen_values:
+                        value = f"{original_value} ({counter})"
+                        counter += 1
+                
+                seen_values.add(value)
+                option_data = {'value': value}
+                
+                # 이미지 URL이 있으면 이미지 정보 추가
+                if 'image' in option and option['image']:
+                    option_data['image'] = {
+                        'sourceUri': option['image']
+                    }
+                options.append(option_data)
+            else:
+                # 문자열 옵션인 경우
+                value = str(option)
+                if value in seen_values:
+                    # 중복된 경우 고유 값으로 만들기 (숫자 추가)
+                    original_value = value
+                    counter = 1
+                    while value in seen_values:
+                        value = f"{original_value} ({counter})"
+                        counter += 1
+                
+                seen_values.add(value)
+                options.append({'value': value})
+        
         request['createItem']['item']['questionItem']['question']['choiceQuestion'] = {
-            'type': 'RADIO',
-            'options': options
-        }
-    elif question['type'] == 'CHECKBOX':
-        options = [{'value': option} for option in question.get('options', [])]
-        request['createItem']['item']['questionItem']['question']['choiceQuestion'] = {
-            'type': 'CHECKBOX',
+            'type': question['type'],
             'options': options
         }
     else:
@@ -345,7 +391,7 @@ def create_sample_form(form_title, folder_id):
         print(f"오류가 발생했습니다: {error}")
         return None
 
-def create_form_with_gui(template_name, folder_name, custom_title, custom_description, custom_image_url=None, target_drive_id="1J0-1mMfQYTkIO3jaI1OReBdPPTnXxP23"):
+def create_form_with_gui(template_name, folder_name, custom_title, custom_description, custom_image_url=None, custom_product_options=None, custom_channel_options=None, target_drive_id="1J0-1mMfQYTkIO3jaI1OReBdPPTnXxP23"):
     """GUI에서 호출하는 폼 생성 함수"""
     try:
         # 인증 정보 가져오기
@@ -373,7 +419,9 @@ def create_form_with_gui(template_name, folder_name, custom_title, custom_descri
                 folder_id, 
                 custom_title, 
                 custom_description, 
-                custom_image_url
+                custom_image_url,
+                custom_product_options,
+                custom_channel_options
             )
         else:
             result = create_sample_form(custom_title, folder_id)
