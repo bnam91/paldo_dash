@@ -1,0 +1,5 @@
+#cmd창을 열어줍니다.
+- 시작 > cmd 입력
+
+# 화면에 아래의 코드를 입력하세요.
+python "C:\Users\USER\Desktop\github\paldo_bogo\가구매_보고_변환기(견적서생성포함).py"
