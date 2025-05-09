@@ -7,13 +7,33 @@ import time
 import numpy as np
 import os
 from datetime import datetime
+from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 
-# JSON 파일 로드
+# MongoDB 연결 설정
+uri = "mongodb+srv://coq3820:JmbIOcaEOrvkpQo1@cluster0.qj1ty.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+client = MongoClient(uri, server_api=ServerApi('1'))
+
+try:
+    # 연결 확인
+    client.admin.command('ping')
+    print("MongoDB 연결 성공!")
+    
+    # 데이터베이스와 컬렉션 선택
+    db = client['insta09_database']
+    collection = db['paldo_countMoney']
+except Exception as e:
+    print(f"MongoDB 연결 실패: {e}")
+
 @st.cache_data(ttl=None)  # 수동으로 캐시 초기화할 때만 갱신
 def load_data():
     try:
-        with open('현황.json', 'r', encoding='utf-8') as file:
-            data = json.load(file)
+        # MongoDB에서 데이터 로드
+        data = list(collection.find({}, {'_id': 0}))
+        if not data:
+            return pd.DataFrame()
+        
+        # DataFrame 생성
         df = pd.DataFrame(data)
         
         # 날짜 컬럼을 datetime 타입으로 변환
@@ -23,17 +43,8 @@ def load_data():
                 df[col] = pd.to_datetime(df[col], errors='coerce')
         
         return df
-    except FileNotFoundError:
-        # 파일이 없을 경우 빈 DataFrame 생성
-        st.warning('현황.json 파일이 없습니다. 새 파일을 생성합니다.')
-        with open('현황.json', 'w', encoding='utf-8') as file:
-            json.dump([], file, ensure_ascii=False, indent=2)
-        return pd.DataFrame()
-    except json.JSONDecodeError:
-        st.error('JSON 파일 형식이 올바르지 않습니다. 파일을 확인하세요.')
-        return pd.DataFrame()
     except Exception as e:
-        st.error(f'파일 로드 중 오류 발생: {e}')
+        st.error(f"데이터 로드 중 오류 발생: {e}")
         return pd.DataFrame()
 
 # 페이지 설정 - 와이드 모드 적용
@@ -49,97 +60,42 @@ if st.button('데이터 새로고침', key='refresh_data'):
     time.sleep(0.5)
     st.rerun()  # 페이지 새로고침
 
-# 수정된 데이터를 JSON 파일로 저장하는 함수
+# 수정된 데이터를 MongoDB에 저장하는 함수
 def save_data(dataframe):
     try:
         # DataFrame의 복사본 생성
         save_df = dataframe.copy()
         
-        # 모든 NaT 값을 None으로 변환 (사전 처리)
-        for col in save_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(save_df[col]):
-                save_df[col] = save_df[col].astype(object).where(~pd.isna(save_df[col]), None)
+        # 날짜 컬럼을 문자열로 변환
+        date_columns = ['착수일', '중간보고', '내부마감', '보고예정일', '요청일', '보고완료일']
+        for col in date_columns:
+            if col in save_df.columns:
+                # datetime 타입인 경우에만 변환
+                if pd.api.types.is_datetime64_any_dtype(save_df[col]):
+                    save_df[col] = save_df[col].dt.strftime('%Y-%m-%d')
+                # NaT 값을 None으로 변환
+                save_df[col] = save_df[col].where(pd.notnull(save_df[col]), None)
         
-        # 데이터프레임을 리스트로 변환
-        data_list = []
-        for _, row in save_df.iterrows():
-            row_dict = {}
-            for col, val in row.items():
-                # 날짜 타입 처리
-                if isinstance(val, (pd.Timestamp, pd.DatetimeIndex)):
-                    row_dict[col] = val.strftime('%Y-%m-%d')
-                # None, NaN 처리
-                elif val is None or (isinstance(val, float) and np.isnan(val)):
-                    row_dict[col] = None
-                # 기타 값은 그대로 사용
-                else:
-                    row_dict[col] = val
-            data_list.append(row_dict)
+        # 품목상세 데이터 처리
+        if '품목상세' in save_df.columns:
+            save_df['품목상세'] = save_df['품목상세'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, (list, dict)) else x)
         
-        # 향상된 JSON 인코더
-        class EnhancedJSONEncoder(json.JSONEncoder):
-            def default(self, obj):
-                # NaT 체크 - 다양한 방법 사용
-                if str(obj) == 'NaT' or (hasattr(obj, '__class__') and obj.__class__.__name__ == 'NaTType'):
-                    return None
-                
-                # 날짜/시간 타입 처리
-                if isinstance(obj, (pd.Timestamp, pd.DatetimeIndex)):
-                    return obj.strftime('%Y-%m-%d')
-                # NumPy 타입 처리
-                elif isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                elif isinstance(obj, (np.int64, np.int32)):
-                    return int(obj)
-                elif isinstance(obj, (np.float64, np.float32)):
-                    return float(obj)
-                # 그 외 모든 경우
-                try:
-                    return super().default(obj)
-                except TypeError:
-                    # 최후의 방어: 문자열로 변환 시도
-                    return str(obj)
-        
-        # JSON 파일로 저장
-        with open('현황.json', 'w', encoding='utf-8') as file:
-            json.dump(data_list, file, ensure_ascii=False, indent=2, cls=EnhancedJSONEncoder)
-        
-        # 백업 폴더 생성 (없는 경우)
-        backup_dir = 'back_up'
-        if not os.path.exists(backup_dir):
-            os.makedirs(backup_dir)
-        
-        # 새 백업 파일 생성 (타임스탬프 포함)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_filename = f"{backup_dir}/현황_{timestamp}.json"
-        
-        # 백업 파일 저장
-        with open(backup_filename, 'w', encoding='utf-8') as backup_file:
-            json.dump(data_list, backup_file, ensure_ascii=False, indent=2, cls=EnhancedJSONEncoder)
-        
-        # 백업 파일 수 제한 (최대 20개)
-        backup_files = [f for f in os.listdir(backup_dir) if f.startswith('현황_') and f.endswith('.json')]
-        backup_files.sort()  # 시간순 정렬 (오래된 것부터)
-        
-        # 최대 백업 파일 수를 초과하면 오래된 것부터 삭제
-        max_backups = 20
-        if len(backup_files) > max_backups:
-            files_to_delete = backup_files[:(len(backup_files) - max_backups)]
-            for file_to_delete in files_to_delete:
-                os.remove(os.path.join(backup_dir, file_to_delete))
+        # DataFrame을 MongoDB에 저장
+        records = save_df.to_dict('records')
+        collection.delete_many({})  # 기존 데이터 삭제
+        if records:
+            collection.insert_many(records)
         
         # 캐시 초기화
         load_data.clear()
         
-        st.success(f'데이터가 성공적으로 저장되었습니다!')
-        return True
+        st.success("데이터가 성공적으로 저장되었습니다.")
+        st.rerun()  # 페이지 새로고침
     except Exception as e:
-        st.error(f'파일 저장 중 오류 발생: {e}')
-        # 오류 메시지 표시
+        st.error(f"데이터 저장 중 오류 발생: {e}")
         import traceback
         st.write("오류 상세:", str(e))
         st.write("스택 트레이스:", traceback.format_exc())
-        return False
 
 # 데이터 로드
 df = load_data()
