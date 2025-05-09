@@ -86,6 +86,30 @@ def save_data(dataframe):
         if records:
             collection.insert_many(records)
         
+        # JSON 백업 생성
+        backup_dir = 'back_up'
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+        
+        # 현재 시간으로 백업 파일명 생성
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f"{backup_dir}/현황_{timestamp}.json"
+        
+        # 백업 파일 저장
+        with open(backup_filename, 'w', encoding='utf-8') as backup_file:
+            json.dump(records, backup_file, ensure_ascii=False, indent=2)
+        
+        # 백업 파일 수 제한 (최대 20개)
+        backup_files = [f for f in os.listdir(backup_dir) if f.startswith('현황_') and f.endswith('.json')]
+        backup_files.sort()  # 시간순 정렬 (오래된 것부터)
+        
+        # 최대 백업 파일 수를 초과하면 오래된 것부터 삭제
+        max_backups = 20
+        if len(backup_files) > max_backups:
+            files_to_delete = backup_files[:(len(backup_files) - max_backups)]
+            for file_to_delete in files_to_delete:
+                os.remove(os.path.join(backup_dir, file_to_delete))
+        
         # 캐시 초기화
         load_data.clear()
         
