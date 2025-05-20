@@ -12,7 +12,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTabWidget, QListWidget, QStackedWidget,
                              QListWidgetItem, QLabel, QPushButton, QComboBox,
                              QLineEdit, QFormLayout, QGroupBox, QRadioButton,
-                             QMessageBox, QCheckBox, QFileDialog, QInputDialog)
+                             QMessageBox, QCheckBox, QFileDialog, QInputDialog,
+                             QProgressBar, QTextEdit)
 from PyQt5.QtCore import Qt, QUrl, QMimeData
 from PyQt5.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
 
@@ -37,6 +38,127 @@ import tempfile
 import uuid
 import os
 from PIL import ImageGrab, Image
+
+# 소셜체험단 업로드트래킹 모듈 임포트
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '소셜체험단_업로드트래킹'))
+from Blog_uploadTracking import setup_webdriver, scrape_blog_data, get_blog_data_from_sheet, extract_sheet_id
+
+class UploadTrackingUI(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        self.driver = None
+        self.service = None
+        
+    def initUI(self):
+        layout = QVBoxLayout()
+        
+        # 구글 시트 설정 그룹
+        sheet_group = QGroupBox("구글 시트 설정")
+        sheet_layout = QFormLayout()
+        
+        self.sheet_id_input = QLineEdit()
+        self.sheet_id_input.setPlaceholderText("구글 시트 URL 또는 ID를 입력하세요")
+        sheet_layout.addRow("시트 URL/ID:", self.sheet_id_input)
+        
+        # 도움말 레이블 추가
+        help_label = QLabel("예시: https://docs.google.com/spreadsheets/d/시트ID/edit 또는 시트ID")
+        help_label.setStyleSheet("color: gray; font-size: 10px;")
+        sheet_layout.addRow("", help_label)
+        
+        sheet_group.setLayout(sheet_layout)
+        layout.addWidget(sheet_group)
+        
+        # 검색 설정 그룹
+        search_group = QGroupBox("검색 설정")
+        search_layout = QFormLayout()
+        
+        self.keyword_input = QLineEdit()
+        self.keyword_input.setPlaceholderText("검색할 키워드를 입력하세요")
+        search_layout.addRow("키워드:", self.keyword_input)
+        
+        search_group.setLayout(search_layout)
+        layout.addWidget(search_group)
+        
+        # 실행 버튼
+        self.start_button = QPushButton("블로그 업로드 추적 시작")
+        self.start_button.clicked.connect(self.start_tracking)
+        layout.addWidget(self.start_button)
+        
+        # 진행 상태 표시
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # 로그 출력 영역
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        layout.addWidget(self.log_output)
+        
+        self.setLayout(layout)
+    
+    def log(self, message):
+        """로그 메시지를 출력 영역에 추가"""
+        self.log_output.append(message)
+    
+    def start_tracking(self):
+        """업로드 추적 시작"""
+        sheet_id_or_url = self.sheet_id_input.text().strip()
+        keyword = self.keyword_input.text().strip()
+        
+        if not sheet_id_or_url:
+            QMessageBox.warning(self, "입력 오류", "구글 시트 URL 또는 ID를 입력해주세요.")
+            return
+        if not keyword:
+            QMessageBox.warning(self, "입력 오류", "검색할 키워드를 입력해주세요.")
+            return
+        
+        try:
+            # 시트 ID 유효성 검사
+            try:
+                spreadsheet_id = extract_sheet_id(sheet_id_or_url)
+            except ValueError as e:
+                QMessageBox.warning(self, "입력 오류", str(e))
+                return
+            
+            # 구글 시트 서비스 초기화
+            creds = get_credentials()
+            self.service = build('sheets', 'v4', credentials=creds)
+            
+            # 블로그 데이터 가져오기
+            self.log("블로그 데이터를 가져오는 중...")
+            urls, names, row_indices = get_blog_data_from_sheet(self.service, sheet_id_or_url)
+            
+            if not urls:
+                self.log("처리할 블로그 데이터가 없습니다.")
+                return
+            
+            self.log(f"총 {len(urls)}개의 블로그를 검색합니다.")
+            
+            # 웹드라이버 설정
+            self.driver = setup_webdriver()
+            
+            # 진행 상태바 설정
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setMaximum(len(urls))
+            self.progress_bar.setValue(0)
+            
+            # 각 블로그별로 실시간 처리
+            for i, (url, name, row_index) in enumerate(zip(urls, names, row_indices)):
+                self.log(f"\n{name}의 블로그 검색 중...")
+                data = scrape_blog_data(self.driver, url, keyword, name, self.service, spreadsheet_id, row_index)
+                self.progress_bar.setValue(i + 1)
+            
+            self.log("\n업로드 추적이 완료되었습니다.")
+            
+        except Exception as e:
+            self.log(f"오류 발생: {str(e)}")
+            QMessageBox.critical(self, "오류", f"업로드 추적 중 오류가 발생했습니다: {str(e)}")
+        
+        finally:
+            if self.driver:
+                self.driver.quit()
+            self.progress_bar.setVisible(False)
 
 class Dashboard(QMainWindow):
     def __init__(self):
@@ -70,7 +192,7 @@ class Dashboard(QMainWindow):
         self.add_sidebar_items(self.status_tab, ["대시보드", "통계"])
         
         # 모집 탭에 사이드바 아이템 추가
-        self.add_sidebar_items(self.recruitment_tab, ["구글 모집폼 만들기", "구글 보고폼 만들기", "노션 가이드만들기", "배포", "인원선정"])
+        self.add_sidebar_items(self.recruitment_tab, ["구글 모집폼 만들기", "구글 보고폼 만들기", "노션 가이드만들기", "배포", "인원선정", "업로드 추적"])
         
         # 인원정보 탭에 사이드바 아이템 추가
         self.add_sidebar_items(self.people_tab, ["전체 목록", "검색"])
@@ -146,6 +268,8 @@ class Dashboard(QMainWindow):
             # 콘텐츠 페이지 내용 추가
             if item_text == "구글 모집폼 만들기":
                 content_layout.addWidget(self.create_googleform_ui())
+            elif item_text == "업로드 추적":
+                content_layout.addWidget(UploadTrackingUI())
             else:
                 label = QLabel(f"{item_text} 기능이 여기에 구현됩니다.")
                 label.setAlignment(Qt.AlignCenter)
