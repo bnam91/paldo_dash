@@ -5,3 +5,5 @@ __pycache__/
 VERSION.txt
 업데이트.md
 템플릿삭제예정/
+user_data/
+0_insta_login.txt
