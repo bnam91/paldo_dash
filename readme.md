@@ -7,4 +7,4 @@
 ===
 
 초기세팅
-0_insta_login.txt
+- 0_insta_login.txt

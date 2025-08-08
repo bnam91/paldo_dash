@@ -111,13 +111,72 @@ def convert_to_date(date_str):
     except:
         return datetime.now().strftime('%Y. %m. %d.')
 
-def update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, post_date):
+def get_sheet_names(service, spreadsheet_id):
+    """구글 시트의 모든 시트 이름을 가져옵니다."""
+    try:
+        spreadsheet = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheets = spreadsheet.get('sheets', [])
+        sheet_names = [sheet['properties']['title'] for sheet in sheets]
+        return sheet_names
+    except Exception as e:
+        print(f"시트 이름 가져오기 오류: {str(e)}")
+        return []
+
+def select_sheet(sheet_names):
+    """사용자가 시트를 선택하도록 합니다."""
+    print("\n=== 사용 가능한 시트 목록 ===")
+    for i, name in enumerate(sheet_names, 1):
+        print(f"{i}. {name}")
+    
+    while True:
+        try:
+            choice = int(input(f"\n시트 번호를 선택하세요 (1-{len(sheet_names)}): "))
+            if 1 <= choice <= len(sheet_names):
+                return sheet_names[choice - 1]
+            else:
+                print(f"1부터 {len(sheet_names)} 사이의 숫자를 입력해주세요.")
+        except ValueError:
+            print("올바른 숫자를 입력해주세요.")
+
+def show_preparation_guide():
+    """준비사항을 안내합니다."""
+    print("\n" + "="*60)
+    print("📋 블로그 업로드 트래킹 준비사항")
+    print("="*60)
+    print("\n🔍 구글 시트 준비사항:")
+    print("• B열: 블로그 URL (네이버 블로그 링크)")
+    print("• C열: 업로드 링크 (자동으로 채워짐)")
+    print("• F열: 블로거 이름 (선택사항)")
+    print("• I열: 작성일 (자동으로 채워짐)")
+    print("\n📝 시트 구조 예시:")
+    print("A열 | B열(URL) | C열(업로드링크) | D열 | E열 | F열(이름) | G열 | H열 | I열(작성일)")
+    print("-----|----------|----------------|-----|-----|----------|-----|-----|----------")
+    print("     | https:// | (자동입력)     |     |     | 블로거명  |     |     | (자동입력)")
+    print("\n⚠️  주의사항:")
+    print("• B열에 네이버 블로그 URL이 있어야 합니다")
+    print("• C열이 비어있는 행만 처리됩니다")
+    print("• 키워드가 포함된 첫 번째 글만 업데이트됩니다")
+    print("• 각 블로그당 최대 30개 글을 검색합니다")
+    print("\n" + "="*60)
+
+def get_user_confirmation():
+    """사용자 확인을 받습니다."""
+    while True:
+        confirm = input("\n준비사항을 확인하셨나요? (Y/N): ").strip().upper()
+        if confirm == 'Y':
+            return True
+        elif confirm == 'N':
+            return False
+        else:
+            print("Y 또는 N을 입력해주세요.")
+
+def update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, post_date, sheet_name):
     try:
         # 날짜 형식 변환
         formatted_date = convert_to_date(post_date)
         
         # C열 업데이트
-        range_name_c = f"'시트1'!C{row_index}"
+        range_name_c = f"'{sheet_name}'!C{row_index}"
         body_c = {
             'values': [[link]]
         }
@@ -129,7 +188,7 @@ def update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, po
         ).execute()
         
         # I열 업데이트 (변환된 날짜로)
-        range_name_i = f"'시트1'!I{row_index}"
+        range_name_i = f"'{sheet_name}'!I{row_index}"
         body_i = {
             'values': [[formatted_date]]
         }
@@ -143,7 +202,7 @@ def update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, po
     except Exception as e:
         print(f"시트 업데이트 중 오류 발생: {str(e)}")
 
-def scrape_blog_data(driver, url, keyword, name, service, spreadsheet_id, row_index):
+def scrape_blog_data(driver, url, keyword, name, service, spreadsheet_id, row_index, sheet_name):
     driver.get(url)
     time.sleep(5)
     set_30_line_view(driver)
@@ -169,7 +228,7 @@ def scrape_blog_data(driver, url, keyword, name, service, spreadsheet_id, row_in
                         print(f"\n키워드 '{keyword}' 발견")
                         found_in_blog = True
                         # 작성일을 파라미터로 전달
-                        update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, date)
+                        update_sheet_with_link_and_date(service, spreadsheet_id, row_index, link, date, sheet_name)
                     print(f"제목: {title}")
                     print(f"작성일: {date}")
                     print(f"링크: {link}")
@@ -270,12 +329,12 @@ def extract_sheet_id(input_str):
         else:
             raise ValueError("유효하지 않은 구글 시트 URL 또는 ID입니다.")
 
-def get_blog_data_from_sheet(service, spreadsheet_id_or_url):
+def get_blog_data_from_sheet(service, spreadsheet_id_or_url, sheet_name):
     """구글 시트에서 블로그 데이터를 가져옵니다."""
     try:
         # 시트 ID 추출
         spreadsheet_id = extract_sheet_id(spreadsheet_id_or_url)
-        RANGE_NAME = "'시트1'!B:F"  # B열부터 F열까지 가져오도록 수정
+        RANGE_NAME = f"'{sheet_name}'!B:F"  # 선택된 시트의 B열부터 F열까지 가져오도록 수정
         
         # 시트 데이터 가져오기
         sheet = service.spreadsheets()
@@ -316,8 +375,20 @@ def get_blog_data_from_sheet(service, spreadsheet_id_or_url):
                         # URL에서 ?tab=1 같은 파라미터 제거
                         blog_url = blog_url.split('?')[0]
                     
-                    if blog_url.startswith("https://blog.naver.com/"):
+                    # http와 https 모두 처리
+                    if blog_url.startswith("http://blog.naver.com/") or blog_url.startswith("https://blog.naver.com/"):
+                        # http를 https로 변환
+                        if blog_url.startswith("http://blog.naver.com/"):
+                            blog_url = blog_url.replace("http://blog.naver.com/", "https://blog.naver.com/")
+                        
                         blog_id = blog_url.split('/')[3]
+                        urls.append(f"https://blog.naver.com/PostList.naver?blogId={blog_id}&skinType=&skinId=&from=menu")
+                        names.append(row[4] if len(row) > 4 else "")  # F열(인덱스 4)의 블로거 이름
+                        row_indices.append(i)
+                    # 프로토콜이 없는 blog.naver.com 형태도 처리
+                    elif blog_url.startswith("blog.naver.com/"):
+                        blog_url = "https://" + blog_url
+                        blog_id = blog_url.split('/')[3]  # https://blog.naver.com/eunshilys -> eunshilys
                         urls.append(f"https://blog.naver.com/PostList.naver?blogId={blog_id}&skinType=&skinId=&from=menu")
                         names.append(row[4] if len(row) > 4 else "")  # F열(인덱스 4)의 블로거 이름
                         row_indices.append(i)
@@ -336,6 +407,14 @@ def get_blog_data_from_sheet(service, spreadsheet_id_or_url):
         return [], [], []
 
 def main():
+    # 준비사항 안내
+    show_preparation_guide()
+    
+    # 사용자 확인
+    if not get_user_confirmation():
+        print("프로그램을 종료합니다.")
+        return
+    
     # 키워드 입력 받기
     keyword = get_search_keyword()
     print(f"\n=== '{keyword}' 키워드 검색 시작 ===\n")
@@ -351,8 +430,21 @@ def main():
         return
     
     try:
+        # 시트 ID 추출
+        spreadsheet_id = extract_sheet_id(sheet_id_or_url)
+        
+        # 사용 가능한 시트 목록 가져오기
+        sheet_names = get_sheet_names(service, spreadsheet_id)
+        if not sheet_names:
+            print("시트를 찾을 수 없습니다.")
+            return
+        
+        # 사용자가 시트 선택
+        selected_sheet = select_sheet(sheet_names)
+        print(f"\n선택된 시트: {selected_sheet}")
+        
         # 구글 시트에서 블로그 데이터 가져오기
-        urls, names, row_indices = get_blog_data_from_sheet(service, sheet_id_or_url)
+        urls, names, row_indices = get_blog_data_from_sheet(service, sheet_id_or_url, selected_sheet)
         if not urls:
             print("처리할 블로그 데이터가 없습니다.")
             return
@@ -365,7 +457,7 @@ def main():
         # 각 블로그별로 실시간 처리
         for url, name, row_index in zip(urls, names, row_indices):
             print(f"\n{name}의 블로그 검색 중...")
-            data = scrape_blog_data(driver, url, keyword, name, service, extract_sheet_id(sheet_id_or_url), row_index)
+            data = scrape_blog_data(driver, url, keyword, name, service, spreadsheet_id, row_index, selected_sheet)
             data_list.append(data)
         
         driver.quit()
